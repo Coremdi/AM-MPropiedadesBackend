@@ -86,10 +86,10 @@ def create_property():
                 res = supabase.storage.from_(SUPABASE_BUCKET).upload(
                     filename, img.stream.read(), {"content-type": img.content_type}
                 )
-                if res.get("error"):
-                    print(f"⚠️ Supabase upload failed for {filename}: {res['error']}")
+                if res.error:
+                    print(f"⚠️ Supabase upload failed for {filename}: {res.error}")
                     continue
-                image_url = f"https://{SUPABASE_URL}/storage/v1/object/public/{SUPABASE_BUCKET}/{filename}"
+                image_url = supabase.storage.from_(SUPABASE_BUCKET).get_public_url(filename)
                 print(f"🖼️ Uploaded to Supabase: {image_url}")
             else:
                 # Local save
