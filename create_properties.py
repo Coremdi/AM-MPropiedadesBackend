@@ -86,11 +86,11 @@ def create_property():
                 res = supabase.storage.from_(SUPABASE_BUCKET).upload(
                     filename, img.stream.read(), {"content-type": img.content_type}
                 )
-                if res.error:
-                    print(f"⚠️ Supabase upload failed for {filename}: {res.error}")
-                    continue
-                image_url = supabase.storage.from_(SUPABASE_BUCKET).get_public_url(filename)
-                print(f"🖼️ Uploaded to Supabase: {image_url}")
+                if res.status_code != 200:
+                    raise Exception(f"Upload failed: {res}")
+                else:
+                    print(f"Upload successful: {res}")
+                
             else:
                 # Local save
                 os.makedirs("./static/images", exist_ok=True)
