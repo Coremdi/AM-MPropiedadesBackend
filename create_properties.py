@@ -83,7 +83,7 @@ def create_property():
 
             if SUPABASE_ENABLED:
                 # Upload to Supabase
-                res = supabase.storage.from_bucket(SUPABASE_BUCKET).upload(
+                res = supabase.storage.from_(SUPABASE_BUCKET).upload(
                     filename, img.stream.read(), {"content-type": img.content_type}
                 )
                 if res.get("error"):
