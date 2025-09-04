@@ -29,17 +29,22 @@ def upload_images(property_id):
 
         for img in images:
             filename = f"{property_id}_{img.filename}"
+            try:
 
-            if SUPABASE_ENABLED:
-                # Upload to Supabase bucket
-                res = supabase.storage.from_bucket(SUPABASE_BUCKET).upload(
-                    filename, img.stream.read(), {"content-type": img.content_type}
-                )
-                if res.get("error"):
-                    print(f"⚠️ Supabase upload failed for {filename}: {res['error']}")
-                    continue
-                image_url = f"https://{SUPABASE_URL}/storage/v1/object/public/{SUPABASE_BUCKET}/{filename}"
-                print(f"🖼️ Uploaded to Supabase: {image_url}")
+                if SUPABASE_ENABLED:
+                    # Upload to Supabase bucket
+                    response = supabase.storage.from_(SUPABASE_BUCKET).upload(
+                            filename, img.stream.read(), {"content-type": img.content_type}
+                        )
+                    if hasattr(response, "error") and response.error is not None:
+                            print(f"⚠️ Supabase upload failed for {filename}: {response.error}")
+                            continue
+                    image_url = f"{SUPABASE_URL}/storage/v1/object/public/{SUPABASE_BUCKET}/{filename}"
+                    print(f"🖼️ Uploaded to Supabase: {image_url}")
+            except Exception as upload_error:
+                print(f"❌ Error uploading {filename} to Supabase: {upload_error}")
+                continue
+                
             else:
                 # Local save
                 os.makedirs("./static/images", exist_ok=True)
