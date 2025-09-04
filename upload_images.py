@@ -40,6 +40,10 @@ def upload_images(property_id):
                             print(f"⚠️ Supabase upload failed for {filename}: {response.error}")
                             continue
                     image_url = f"{SUPABASE_URL}/storage/v1/object/public/{SUPABASE_BUCKET}/{filename}"
+                    cur.execute(
+                             "INSERT INTO images (property_id, url, last_updated) VALUES (%s, %s, %s)",
+                             (property_id, image_url, last_updated)
+                    )
                     print(f"🖼️ Uploaded to Supabase: {image_url}")
             except Exception as upload_error:
                 print(f"❌ Error uploading {filename} to Supabase: {upload_error}")
