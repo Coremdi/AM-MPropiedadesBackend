@@ -29,41 +29,44 @@ def upload_images(property_id):
 
         for img in images:
             filename = f"{property_id}_{img.filename}"
-            try:
 
-                if SUPABASE_ENABLED:
+            if SUPABASE_ENABLED:
+                try:
                     # Upload to Supabase bucket
                     response = supabase.storage.from_(SUPABASE_BUCKET).upload(
-                            filename, img.stream.read(), {"content-type": img.content_type}
-                        )
+                        filename, img.stream.read(), {"content-type": img.content_type}
+                    )
                     if hasattr(response, "error") and response.error is not None:
-                            print(f"⚠️ Supabase upload failed for {filename}: {response.error}")
-                            continue
+                        print(f"⚠️ Supabase upload failed for {filename}: {response.error}")
+                        continue
+
+                    # Only insert Supabase URL
                     image_url = f"{SUPABASE_URL}/storage/v1/object/public/{SUPABASE_BUCKET}/{filename}"
                     cur.execute(
-                             "INSERT INTO images (property_id, url, last_updated) VALUES (%s, %s, %s)",
-                             (property_id, image_url, last_updated)
+                        "INSERT INTO images (property_id, url, last_updated) VALUES (%s, %s, %s)",
+                        (property_id, image_url, last_updated)
                     )
+                    image_urls.append(image_url)
                     print(f"🖼️ Uploaded to Supabase: {image_url}")
-            except Exception as upload_error:
-                print(f"❌ Error uploading {filename} to Supabase: {upload_error}")
-                continue
-                
+
+                except Exception as upload_error:
+                    print(f"❌ Error uploading {filename} to Supabase: {upload_error}")
+                    continue
+
             else:
                 # Local save
                 os.makedirs("./static/images", exist_ok=True)
                 save_path = os.path.join("static", "images", filename)
                 img.save(save_path)
                 image_url = f"/static/images/{filename}"
-                print(f"🖼️ Saved image locally: {save_path}")
 
-            # Insert into DB
-            cur.execute(
-                "INSERT INTO images (property_id, url, last_updated) VALUES (%s, %s, %s)",
-                (property_id, image_url, last_updated)
-            )
-            image_urls.append(image_url)
-            print(f"✅ Inserted image record: {image_url}")
+                # Only insert local path
+                cur.execute(
+                    "INSERT INTO images (property_id, url, last_updated) VALUES (%s, %s, %s)",
+                    (property_id, image_url, last_updated)
+                )
+                image_urls.append(image_url)
+                print(f"🖼️ Saved image locally: {save_path}")
 
         conn.commit()
         return jsonify({"message": "Images uploaded successfully", "images": image_urls}), 200
