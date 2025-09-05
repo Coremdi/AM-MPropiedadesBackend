@@ -40,12 +40,15 @@ def delete_images(property_id):
             # --- Supabase deletion ---
             if SUPABASE_ENABLED:
                 filename = url.split("/")[-1]  # get the filename from the URL
-                res = supabase.storage.from_bucket(SUPABASE_BUCKET).remove([filename])
-                if res.get("error"):
-                    print(f"⚠️ Supabase delete failed for {filename}: {res['error']}")
-                else:
-                    deleted_files.append(url)
-                    print(f"🧹 Deleted from Supabase: {filename}")
+                try:                    
+                    res = supabase.storage.from_(SUPABASE_BUCKET).remove([filename])
+                    if hasattr(res, "error") and res.error is not None:
+                        print(f"⚠️ Supabase delete failed for {filename}: {res.error}")
+                    else:
+                        deleted_files.append(url)
+                        print(f"🧹 Deleted from Supabase: {filename}")
+                except Exception as supa_err:
+                    print(f"❌ Error deleting {filename} from Supabase: {supa_err}")
 
             # --- Delete record from DB ---
             cur.execute(
