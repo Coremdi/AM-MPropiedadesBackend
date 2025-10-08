@@ -41,16 +41,19 @@ FROM properties p
 """
 
 def fetch_properties(query, params=None, single=False):
-    """Executes a SELECT query and returns JSON objects."""
+    """Ejecuta un SELECT y devuelve los resultados en formato JSON."""
     try:
-        with get_db_connection() as conn, conn.cursor() as cur:
-            cur.execute(query, params or ())
-            rows = cur.fetchall()
-            if single:
-                return (rows[0][0] if rows else None), None
-            return [r[0] for r in rows], None
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(query, params or ())
+                rows = cur.fetchall()
+
+                if single:
+                    return (rows[0][0] if rows else None), None
+                return [r[0] for r in rows], None
+
     except Exception as e:
-        current_app.logger.error(f"Database error: {e}")
+        current_app.logger.error(f"❌ Database error in fetch_properties: {e}")
         return None, str(e)
 
 # ------------------------- ADMIN ROUTES ----------------------------------

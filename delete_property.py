@@ -63,5 +63,8 @@ def delete_property():
     except Exception as e:
         print("❌ Error deleting property:", e)
         return jsonify({"error": f"Failed to delete property: {str(e)}"}), 500
+    finally:
+        if conn:
+            conn.close()
 
 

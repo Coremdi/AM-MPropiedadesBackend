@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify
-from db import get_db_connection
-from datetime import datetime, timezone
+from db import get_conn, put_conn
+from datetime import datetime
 import os
 
 # Supabase setup if deployed
@@ -16,6 +16,7 @@ create_property_bp = Blueprint('create_admin_properties', __name__)
 
 @create_property_bp.route('/admin/createproperty', methods=['POST'])
 def create_property():
+    conn = None
     try:
         images = request.files.getlist("images")
         if len(images) > 10:
@@ -23,8 +24,9 @@ def create_property():
         if len(images) == 0:
             return jsonify({"error": "At least one image is required."}), 400
 
-        conn = get_db_connection()
+        conn = get_conn()
         cur = conn.cursor()
+
         last_updated = datetime.now()
         listed_date = datetime.now()
 
@@ -54,7 +56,6 @@ def create_property():
             operation, type_, description, listed_date, last_updated, status
         ))
         property_id = cur.fetchone()[0]
-        print(f"✅ Property created with ID: {property_id}")
 
         # Insert price history
         cur.execute(
@@ -73,7 +74,7 @@ def create_property():
         # Insert contact
         cur.execute(
             "INSERT INTO contacts (property_id, whatsapp, email) VALUES (%s, %s, %s)",
-            (property_id, "+5491123456789", "info@realestate.com")
+            (property_id, "+5492616086463", "amympropiedades@gmail.com")
         )
 
         # Handle images
@@ -82,43 +83,35 @@ def create_property():
             filename = f"{property_id}_{img.filename}"
 
             if SUPABASE_ENABLED:
-                # Upload to Supabase
-                 try:
+                try:
                     response = supabase.storage.from_(SUPABASE_BUCKET).upload(
                         filename, img.stream.read(), {"content-type": img.content_type}
                     )
-
-                    # ✅ Check for errors in response
                     if hasattr(response, "error") and response.error is not None:
                         print(f"⚠️ Supabase upload failed for {filename}: {response.error}")
                         continue
 
-                    # ✅ Construct public URL for the uploaded image
                     image_url = f"{SUPABASE_URL}/storage/v1/object/public/{SUPABASE_BUCKET}/{filename}"
                     cur.execute(
-                             "INSERT INTO images (property_id, url, last_updated) VALUES (%s, %s, %s)",
-                             (property_id, image_url, last_updated)
+                        "INSERT INTO images (property_id, url, last_updated) VALUES (%s, %s, %s)",
+                        (property_id, image_url, last_updated)
                     )
                     image_urls.append(image_url)
-                    print(f"🖼️ Uploaded to Supabase: {image_url}")
-                 except Exception as upload_error:
+                except Exception as upload_error:
                     print(f"❌ Error uploading to Supabase: {upload_error}")
-                 continue
-                
+                continue
             else:
-                # Local save
+                # Save locally
                 os.makedirs("./static/images", exist_ok=True)
                 save_path = os.path.join("static", "images", filename)
                 img.save(save_path)
                 image_url = f"/static/images/{filename}"
-                print(f"🖼️ Saved image locally: {save_path}")
 
-            # Insert image record
-            cur.execute(
-                "INSERT INTO images (property_id, url, last_updated) VALUES (%s, %s, %s)",
-                (property_id, image_url, last_updated)
-            )
-            image_urls.append(image_url)
+                cur.execute(
+                    "INSERT INTO images (property_id, url, last_updated) VALUES (%s, %s, %s)",
+                    (property_id, image_url, last_updated)
+                )
+                image_urls.append(image_url)
 
         # Set preview image
         if image_urls:
@@ -128,6 +121,10 @@ def create_property():
         return jsonify({"message": "Property created", "id": property_id, "images": image_urls}), 201
 
     except Exception as e:
+        if conn:
+            conn.rollback()
         print("❌ Error:", e)
         return jsonify({"error": f"Error creating property: {str(e)}"}), 500
-
+    finally:
+        if conn:
+            put_conn(conn)  # 🔑 devuelve la conexión al pool
