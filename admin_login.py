@@ -12,11 +12,15 @@ def login():
     username = data.get('username')
     password = data.get('password')
 
-    with get_db_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT password FROM admins WHERE username = %s", (username,))
-            row = cur.fetchone()
-  
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("SELECT password FROM admins WHERE username = %s", (username,))
+    row = cur.fetchone()
+
+    cur.close()
+    conn.close()
+    
     
     print(f"Login attempt for: {username}")
     if row:

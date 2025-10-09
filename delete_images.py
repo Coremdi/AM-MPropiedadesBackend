@@ -63,8 +63,5 @@ def delete_images(property_id):
     except Exception as e:
         print("❌ Error deleting images:", e)
         return jsonify({"error": f"Failed to delete images: {str(e)}"}), 500
-    finally:
-        if conn:
-            conn.close()
 
 
