@@ -1,6 +1,6 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from db import get_db_connection
-from datetime import datetime, timezone
+from datetime import datetime
 import os
 
 # Supabase setup if deployed
@@ -23,12 +23,7 @@ def create_property():
         if len(images) == 0:
             return jsonify({"error": "At least one image is required."}), 400
 
-        conn = get_db_connection()
-        cur = conn.cursor()
-        last_updated = datetime.now()
-        listed_date = datetime.now()
-
-        # Extract fields
+        # Extract form fields
         title = request.form.get("title")
         location = request.form.get("location")
         price = int(request.form.get("price", 0))
@@ -40,93 +35,93 @@ def create_property():
         description = request.form.get("description")
         status = request.form.get("status")
         amenities = request.form.get("amenities")
+        listed_date = last_updated = datetime.now()
 
-        # Insert property
-        insert_query = """
-            INSERT INTO properties (
-                title, location, price, bedrooms, bathrooms, superficie,
-                operation, type, description, url, listed_date, last_updated, status
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, '', %s, %s, %s)
-            RETURNING id;
-        """
-        cur.execute(insert_query, (
-            title, location, price, bedrooms, bathrooms, superficie,
-            operation, type_, description, listed_date, last_updated, status
-        ))
-        property_id = cur.fetchone()[0]
-        print(f"✅ Property created with ID: {property_id}")
+        # ✅ Use the pool connection safely
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                # Insert property
+                insert_query = """
+                    INSERT INTO properties (
+                        title, location, price, bedrooms, bathrooms, superficie,
+                        operation, type, description, url, listed_date, last_updated, status
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, '', %s, %s, %s)
+                    RETURNING id;
+                """
+                cur.execute(insert_query, (
+                    title, location, price, bedrooms, bathrooms, superficie,
+                    operation, type_, description, listed_date, last_updated, status
+                ))
+                property_id = cur.fetchone()[0]
 
-        # Insert price history
-        cur.execute(
-            "INSERT INTO price_history (property_id, last_updated, price) VALUES (%s, %s, %s)",
-            (property_id, last_updated, price)
-        )
-
-        # Insert amenities
-        if amenities:
-            for amenity in [a.strip() for a in amenities.split(",") if a.strip()]:
+                # Insert price history
                 cur.execute(
-                    "INSERT INTO amenities (property_id, name, last_updated) VALUES (%s, %s, %s)",
-                    (property_id, amenity, last_updated)
+                    "INSERT INTO price_history (property_id, last_updated, price) VALUES (%s, %s, %s)",
+                    (property_id, last_updated, price)
                 )
 
-        # Insert contact
-        cur.execute(
-            "INSERT INTO contacts (property_id, whatsapp, email) VALUES (%s, %s, %s)",
-            (property_id, "+5492616086463", "amympropiedades@gmail.com")
-        )
+                # Insert amenities
+                if amenities:
+                    for amenity in [a.strip() for a in amenities.split(",") if a.strip()]:
+                        cur.execute(
+                            "INSERT INTO amenities (property_id, name, last_updated) VALUES (%s, %s, %s)",
+                            (property_id, amenity, last_updated)
+                        )
 
-        # Handle images
+                # Insert contact
+                cur.execute(
+                    "INSERT INTO contacts (property_id, whatsapp, email) VALUES (%s, %s, %s)",
+                    (property_id, "+5492616086463", "amympropiedades@gmail.com")
+                )
+
+                # Commit the inserts before handling images (to avoid lock if upload is slow)
+                conn.commit()
+
+        # ✅ Upload images outside the DB transaction
         image_urls = []
         for img in images:
             filename = f"{property_id}_{img.filename}"
 
-            if SUPABASE_ENABLED:
-                # Upload to Supabase
-                 try:
+            try:
+                if SUPABASE_ENABLED:
                     response = supabase.storage.from_(SUPABASE_BUCKET).upload(
                         filename, img.stream.read(), {"content-type": img.content_type}
                     )
-
-                    # ✅ Check for errors in response
                     if hasattr(response, "error") and response.error is not None:
                         print(f"⚠️ Supabase upload failed for {filename}: {response.error}")
                         continue
-
-                    # ✅ Construct public URL for the uploaded image
                     image_url = f"{SUPABASE_URL}/storage/v1/object/public/{SUPABASE_BUCKET}/{filename}"
-                    cur.execute(
-                             "INSERT INTO images (property_id, url, last_updated) VALUES (%s, %s, %s)",
-                             (property_id, image_url, last_updated)
-                    )
-                    image_urls.append(image_url)
                     print(f"🖼️ Uploaded to Supabase: {image_url}")
-                 except Exception as upload_error:
-                    print(f"❌ Error uploading to Supabase: {upload_error}")
-                 continue
-                
-            else:
-                # Local save
-                os.makedirs("./static/images", exist_ok=True)
-                save_path = os.path.join("static", "images", filename)
-                img.save(save_path)
-                image_url = f"/static/images/{filename}"
-                print(f"🖼️ Saved image locally: {save_path}")
+                else:
+                    os.makedirs("./static/images", exist_ok=True)
+                    save_path = os.path.join("static", "images", filename)
+                    img.save(save_path)
+                    image_url = f"/static/images/{filename}"
+                    print(f"🖼️ Saved locally: {save_path}")
 
-            # Insert image record
-            cur.execute(
-                "INSERT INTO images (property_id, url, last_updated) VALUES (%s, %s, %s)",
-                (property_id, image_url, last_updated)
-            )
-            image_urls.append(image_url)
+                image_urls.append(image_url)
 
-        # Set preview image
+                # ✅ Insert each image in a new lightweight connection
+                with get_db_connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            "INSERT INTO images (property_id, url, last_updated) VALUES (%s, %s, %s)",
+                            (property_id, image_url, last_updated)
+                        )
+                        conn.commit()
+
+            except Exception as upload_error:
+                print(f"❌ Error uploading image {filename}: {upload_error}")
+
+        # ✅ Update preview image (again with short pooled connection)
         if image_urls:
-            cur.execute("UPDATE properties SET url = %s WHERE id = %s", (image_urls[0], property_id))
+            with get_db_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("UPDATE properties SET url = %s WHERE id = %s", (image_urls[0], property_id))
+                    conn.commit()
 
-        conn.commit()
         return jsonify({"message": "Property created", "id": property_id, "images": image_urls}), 201
 
     except Exception as e:
-        print("❌ Error:", e)
+        current_app.logger.error(f"❌ Error creating property: {e}")
         return jsonify({"error": f"Error creating property: {str(e)}"}), 500

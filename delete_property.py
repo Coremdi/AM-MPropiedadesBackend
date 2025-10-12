@@ -1,8 +1,8 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from db import get_db_connection
 import os
 
-# Supabase setup if deployed
+# --- Supabase setup ---
 SUPABASE_ENABLED = os.getenv("RENDER_DEPLOYMENT", "false").lower() == "true"
 if SUPABASE_ENABLED:
     from supabase import create_client
@@ -20,48 +20,52 @@ def delete_property():
         if not property_id:
             return jsonify({"error": "Missing property ID"}), 400
 
-        conn = get_db_connection()
-        cur = conn.cursor()
+        # --- 1️⃣ Obtener las imágenes antes de eliminar ---
+        image_rows = []
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT url FROM images WHERE property_id = %s", (property_id,))
+                image_rows = cur.fetchall()
 
-        # 🖼 Fetch image file paths before deleting
-        cur.execute("SELECT url FROM images WHERE property_id = %s", (property_id,))
-        image_rows = cur.fetchall()
-
+        # --- 2️⃣ Borrar los archivos físicamente (locales o en Supabase) ---
         for (url,) in image_rows:
-            # --- Local deletion ---
-            if not SUPABASE_ENABLED and url.startswith("/static/images/"):
-                image_path = os.path.join(".", url.lstrip("/"))
-                if os.path.exists(image_path):
-                    os.remove(image_path)
-                    print(f"🧹 Deleted file: {image_path}")
-                else:
-                    print(f"⚠️ File not found: {image_path}")
-
-            # --- Supabase deletion ---
-            if SUPABASE_ENABLED:
-                filename = url.split("/")[-1]
-                try:            
+            try:
+                if SUPABASE_ENABLED:
+                    filename = url.split("/")[-1]
                     res = supabase.storage.from_(SUPABASE_BUCKET).remove([filename])
                     if hasattr(res, "error") and res.error is not None:
-                        print(f"⚠️ Supabase delete failed for {filename}: {res.error}")
+                        current_app.logger.warning(f"⚠️ Supabase delete failed for {filename}: {res.error}")
                     else:
-                        print(f"🧹 Deleted from Supabase: {filename}")
-                except Exception as supa_err:
-                    print(f"❌ Error deleting from Supabase: {supa_err}")
+                        current_app.logger.info(f"🧹 Deleted from Supabase: {filename}")
 
-        # ❌ Delete from DB (children → parent order)
-        cur.execute("DELETE FROM images WHERE property_id = %s", (property_id,))
-        cur.execute("DELETE FROM amenities WHERE property_id = %s", (property_id,))
-        cur.execute("DELETE FROM contacts WHERE property_id = %s", (property_id,))
-        cur.execute("DELETE FROM price_history WHERE property_id = %s", (property_id,))
-        cur.execute("DELETE FROM properties WHERE id = %s", (property_id,))
+                elif url.startswith("/static/images/"):
+                    image_path = os.path.join(".", url.lstrip("/"))
+                    if os.path.exists(image_path):
+                        os.remove(image_path)
+                        current_app.logger.info(f"🧹 Deleted local file: {image_path}")
+                    else:
+                        current_app.logger.warning(f"⚠️ File not found: {image_path}")
 
-        conn.commit()
-        print(f"✅ Property {property_id} and associated data deleted successfully")
+            except Exception as supa_err:
+                current_app.logger.error(f"❌ Error deleting file {url}: {supa_err}")
+                continue
+
+        # --- 3️⃣ Borrar registros en la base (orden correcto: hijos → padre) ---
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM images WHERE property_id = %s", (property_id,))
+                cur.execute("DELETE FROM amenities WHERE property_id = %s", (property_id,))
+                cur.execute("DELETE FROM contacts WHERE property_id = %s", (property_id,))
+                cur.execute("DELETE FROM price_history WHERE property_id = %s", (property_id,))
+                cur.execute("DELETE FROM properties WHERE id = %s", (property_id,))
+                conn.commit()
+
+        current_app.logger.info(f"✅ Property {property_id} and related data deleted successfully")
         return jsonify({"message": f"Property {property_id} deleted successfully"}), 200
 
     except Exception as e:
-        print("❌ Error deleting property:", e)
+        current_app.logger.error(f"❌ Error deleting property {property_id}: {e}")
         return jsonify({"error": f"Failed to delete property: {str(e)}"}), 500
+
 
 

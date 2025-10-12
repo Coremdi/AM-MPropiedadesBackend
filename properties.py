@@ -1,9 +1,10 @@
 from flask import Blueprint, jsonify, current_app
+from psycopg2 import OperationalError
 from db import get_db_connection
 
 properties_bp = Blueprint("properties", __name__)
 
-# Reusable SELECT block (no ORDER BY so WHERE can be appended)
+# ------------------------- SELECT BLOCK ----------------------------------
 SELECT_JSON_BLOCK = """
 SELECT jsonb_build_object(
     'id',         p.id,
@@ -40,51 +41,58 @@ SELECT jsonb_build_object(
 FROM properties p
 """
 
+# ------------------------- FETCH FUNCTION --------------------------------
 def fetch_properties(query, params=None, single=False):
     """Executes a SELECT query and returns JSON objects."""
     try:
         with get_db_connection() as conn, conn.cursor() as cur:
-            cur.execute(query, params or ())
+            cur.execute(query, params if params else ())
             rows = cur.fetchall()
             if single:
                 return (rows[0][0] if rows else None), None
             return [r[0] for r in rows], None
+
+    except OperationalError as oe:
+        current_app.logger.error(f"Database connection error: {oe}")
+        return None, "Database connection error"
     except Exception as e:
-        current_app.logger.error(f"Database error: {e}")
+        current_app.logger.error(f"Database query error: {e}")
         return None, str(e)
 
 # ------------------------- ADMIN ROUTES ----------------------------------
-
 @properties_bp.route("/admin/properties", methods=["GET"])
 def list_properties():
     rows, error = fetch_properties(SELECT_JSON_BLOCK + " ORDER BY p.id;")
     if error:
-        return jsonify({"error": "Failed to fetch properties"}), 500
+        return jsonify({"error": error}), 500
     return jsonify(rows), 200
 
 @properties_bp.route("/admin/properties/<int:property_id>", methods=["GET"])
 def get_property(property_id):
-    row, error = fetch_properties(SELECT_JSON_BLOCK + " WHERE p.id = %s;", (property_id,), single=True)
+    row, error = fetch_properties(
+        SELECT_JSON_BLOCK + " WHERE p.id = %s;", (property_id,), single=True
+    )
     if error:
-        return jsonify({"error": "Failed to fetch property"}), 500
+        return jsonify({"error": error}), 500
     if not row:
         return jsonify({"error": "Property not found"}), 404
     return jsonify(row), 200
 
 # ------------------------- PUBLIC ROUTES ---------------------------------
-
 @properties_bp.route("/properties", methods=["GET"])
 def public_list_properties():
     rows, error = fetch_properties(SELECT_JSON_BLOCK + " ORDER BY p.id;")
     if error:
-        return jsonify({"error": "Failed to fetch properties"}), 500
+        return jsonify({"error": error}), 500
     return jsonify(rows), 200
 
 @properties_bp.route("/properties/<int:property_id>", methods=["GET"])
 def get_public_property(property_id):
-    row, error = fetch_properties(SELECT_JSON_BLOCK + " WHERE p.id = %s;", (property_id,), single=True)
+    row, error = fetch_properties(
+        SELECT_JSON_BLOCK + " WHERE p.id = %s;", (property_id,), single=True
+    )
     if error:
-        return jsonify({"error": "Failed to fetch property"}), 500
+        return jsonify({"error": error}), 500
     if not row:
         return jsonify({"error": "Property not found"}), 404
     return jsonify(row), 200
